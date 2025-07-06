@@ -1,0 +1,21 @@
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: local-docker-registry
+  namespace: book-author
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: local-docker-registry
+  template:
+    metadata:
+      labels:
+        app: local-docker-registry
+    spec:
+      containers:
+      - name: registry
+        image: registry:2
+        ports:
+        - containerPort: 5000

@@ -1,0 +1,264 @@
+#Kubernetes ec2 single node setup
+
+__________________________________________________________________________________________________________________________________
+
+sudo swapoff -a
+
+
+cat <<EOF | sudo tee /etc/modules-load.d/k8s.conf
+overlay
+br_netfilter
+EOF
+
+sudo modprobe overlay
+sudo modprobe br_netfilter
+
+
+cat <<EOF | sudo tee /etc/sysctl.d/k8s.conf
+net.bridge.bridge-nf-call-iptables  = 1
+net.bridge.bridge-nf-call-ip6tables = 1
+net.ipv4.ip_forward                 = 1
+EOF
+
+sudo sysctl --system
+lsmod | grep br_netfilter
+lsmod | grep overlay
+
+
+
+sudo apt-get update
+sudo apt-get install -y ca-certificates curl
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo \"$VERSION_CODENAME\") stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+sudo apt-get update
+sudo apt-get install -y containerd.io
+
+containerd config default | sed -e 's/SystemdCgroup = false/SystemdCgroup = true/' -e 's/sandbox_image = "registry.k8s.io\/pause:3.6"/sandbox_image = "registry.k8s.io\/pause:3.9"/' | sudo tee /etc/containerd/config.toml
+
+sudo systemctl restart containerd
+sudo systemctl status containerd
+
+
+
+
+
+
+sudo apt-get update
+sudo apt-get install -y apt-transport-https ca-certificates curl gpg
+
+curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.32/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+
+echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.29/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list
+
+sudo apt-get update
+sudo apt-get install -y kubelet kubeadm kubectl
+sudo apt-mark hold kubelet kubeadm kubectl
+
+
+
+sudo kubeadm init
+
+
+mkdir -p "$HOME"/.kube
+sudo cp -i /etc/kubernetes/admin.conf "$HOME"/.kube/config
+sudo chown "$(id -u)":"$(id -g)" "$HOME"/.kube/config
+
+
+kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.26.0/manifests/calico.yaml
+
+
+
+kubectl taint nodes --all node-role.kubernetes.io/control-plane-
+
+
+
+
+
+# MySQL installation
+
+sudo apt update
+sudo apt install mysql-server -y
+
+
+sudo mysql_secure_installation
+
+
+Kubernetes.1234#
+
+sudo nano /etc/mysql/mysql.conf.d/mysqld.cnf
+
+
+sudo systemctl restart mysql
+
+
+sudo mysql -u root -p
+
+
+
+CREATE DATABASE kubernetes_learnings_db;
+
+CREATE USER 'pranav_kubernetes'@'%' IDENTIFIED BY 'Pranav_pandey_1234#';
+
+
+GRANT ALL PRIVILEGES ON kubernetes_learnings_db.* TO 'pranav_kubernetes'@'%';
+
+FLUSH PRIVILEGES;
+
+EXIT;
+
+
+
+# Installing docker
+
+sudo apt update
+sudo apt install -y ca-certificates curl gnupg lsb-release
+
+
+sudo mkdir -p /etc/apt/keyrings
+
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | \
+  sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+
+
+echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
+  https://download.docker.com/linux/ubuntu \
+  $(lsb_release -cs) stable" | \
+  sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+
+
+sudo apt update
+sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+
+
+sudo systemctl start docker
+sudo systemctl enable docker
+
+
+kubectl create namespace book-author
+
+#____________________________________________________________________________________________________________________
+
+# Kubernetes secret manager
+
+
+kubectl create secret generic book-author-secret \
+  --from-env-file=.env \
+  --namespace=book-author
+
+
+kubectl describe secret book-author-secret  --namespace=book-author
+
+kubectl delete secret book-author-secret
+
+#To give list of attributes of the environment variables
+kubectl get secret cgm-secret -o jsonpath="{.data}" | tr -d '{}" ' | tr ',' '\n' | cut -d: -f1
+
+#Convert each valu eto normal text
+for key in $(kubectl get secret book-author-secret -o jsonpath="{.data}" | tr -d '{}" ' | tr ',' '\n' | cut -d: -f1); do
+  echo -n "$key="
+  kubectl get secret book-author-secret -o "jsonpath={.data.$key}" | base64 --decode
+  echo
+done
+
+_________________________________________________________________________________________________________________________
+
+sudo apt update
+sudo apt install -y buildah
+
+
+buildah build -t localhost:5000/book_author_app:latest .
+
+
+buildah push --tls-verify=false localhost:5000/book_author_app:latest
+
+curl http://localhost:5000/v2/_catalog
+
+kubectl rollout restart deployment book-author-app-deployment -n book-author
+
+
+kubectl delete pods --all -n book-author
+
+
+
+
+
+
+kubectl delete deployments --all -n book-author
+kubectl delete pods --all -n book-author
+kubectl delete svc --all -n book-author
+
+
+kubectl delete all --all -n book-author
+
+
+kubectl apply -f registry_deployment.yaml -n book-author
+kubectl apply -f registry_service.yaml -n book-author
+
+kubectl port-forward svc/local-registry 5000:5000 -n book-author
+
+
+buildah build -t localhost:5000/book_author_app:latest .
+
+buildah push --tls-verify=false localhost:5000/book_author_app:latest
+
+curl localhost:5000/v2/_catalog
+
+
+kubectl apply -f book_author_deployment.yaml -n book-author
+
+kubectl apply -f book_author_service.yaml -n book-author
+
+buildah tag localhost:5000/book_author_app:latest local-registry.book-author.svc.cluster.local:5000/book_author_app:latest
+
+
+kubectl rollout restart deployment book-author-app-deployment -n book-author
+
+
+
+_____________________________________________________________________________________________________________________________________
+
+
+CREATE USER 'pranav_kubernetes'@'172.16.134.%' IDENTIFIED BY 'Pranav_pandey_1234#';
+
+
+GRANT ALL PRIVILEGES ON kubernetes_learnings_db.* TO 'pranav_kubernetes'@'172.16.134.%';
+
+
+FLUSH PRIVILEGES;
+________________________________________________________________________________________________________________________________________
+
+
+buildah bud -t localhost:5000/book_author_app:latest .
+
+buildah push --tls-verify=false localhost:5000/book_author_app:latest
+
+kubectl rollout restart deployment book-author-app-deployment -n book-author
+
+kubectl logs book-author-app-deployment-774f484fb4-lp6k2  -n book-author -c alembic-migrations
+
+
+____________________________________________________________________________________________________________________________________
+
+
+curl -H "Accept: application/vnd.oci.image.manifest.v1+json" http://localhost:5000/v2/book_author_app/manifests/latest | jq .config.digest
+"sha256:f1231c11f85941fdca1f28ef502a55ef5e49f31a2e21f197d666ca63a9f359f7"
+
+
+kubectl exec -it book-author-app-deployment-8659bc7689-888kc -n book-author -c alembic-migrations -- env
+
+___________________________________________________________________________________________________________________________________
+
+helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+helm repo update
+
+helm install nginx-ingress ingress-nginx/ingress-nginx \
+  --namespace ingress-nginx --create-namespace \
+  --set controller.service.type=NodePort
+

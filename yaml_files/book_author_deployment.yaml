@@ -1,0 +1,25 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: book-author-app-deployment
+  namespace: book-author
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: book-author-app
+  template:
+    metadata:
+      labels:
+        app: book-author-app
+    spec:
+      restartPolicy: Always
+      containers:
+      - name: book-author-app
+        image: localhost:5000/book_author_app:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+          - containerPort: 8000
+        envFrom:
+          - secretRef:
+              name: book-author-secret

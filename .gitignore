@@ -1,0 +1,18 @@
+# Ignore Python cache and compiled files
+__pycache__/
+*.py[cod]
+*.so
+
+# Ignore virtual environments
+venv/
+.env
+.vault-token
+secrets.env
+
+# Ignore editor config
+.vscode/
+.idea/
+
+# Ignore Alembic SQLite or log files
+*.db
+*.log

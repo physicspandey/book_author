@@ -7,10 +7,10 @@ from app.models.models import Book, Author
 from app.schemas.schemas import BookCreate, BookOut, BookUpdate
 from app.db.dependencies import get_db
 
-book_router = APIRouter(prefix="", tags=["Books API"])
+book_router = APIRouter(prefix="/books", tags=["Books API"])
 
 
-@book_router.post("/", response_model=BookOut)
+@book_router.post("/create", response_model=BookOut)
 async def create_book(book: BookCreate, db: AsyncSession = Depends(get_db)):
 
     result = await db.execute(select(Author).where(Author.id.in_(book.author_ids)))
@@ -35,13 +35,13 @@ async def create_book(book: BookCreate, db: AsyncSession = Depends(get_db)):
     return book_with_authors
 
 
-@book_router.get("/", response_model=list[BookOut])
+@book_router.get("/fetch_all", response_model=list[BookOut])
 async def get_all_books(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Book).options(selectinload(Book.authors)))
     return result.scalars().all()
 
 
-@book_router.get("/{book_id}", response_model=BookOut)
+@book_router.get("/fetch/{book_id}", response_model=BookOut)
 async def get_book(book_id: int, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(Book).options(selectinload(Book.authors)).where(Book.id == book_id)
@@ -52,7 +52,7 @@ async def get_book(book_id: int, db: AsyncSession = Depends(get_db)):
     return book
 
 
-@book_router.put("/{book_id}", response_model=BookOut)
+@book_router.put("/update/{book_id}", response_model=BookOut)
 async def update_book(book_id: int, book_update: BookUpdate, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Book).options(selectinload(Book.authors)).where(Book.id == book_id))
     db_book = result.scalar_one_or_none()
@@ -79,7 +79,7 @@ async def update_book(book_id: int, book_update: BookUpdate, db: AsyncSession = 
     return db_book
 
 
-@book_router.delete("/{book_id}")
+@book_router.delete("/delete/{book_id}")
 async def delete_book(book_id: int, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Book).where(Book.id == book_id))
     book = result.scalar_one_or_none()

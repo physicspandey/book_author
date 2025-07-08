@@ -2,7 +2,26 @@ from pydantic import BaseModel
 from typing import List, Optional
 
 
-# ------------------ BOOK SCHEMAS ------------------
+class AuthorBase(BaseModel):
+    name: str
+    mobile: str
+
+
+class AuthorCreate(AuthorBase):
+    pass
+
+
+class AuthorUpdate(BaseModel):
+    name: str | None = None
+    mobile: str | None = None
+
+
+class AuthorOut(AuthorBase):
+    id: int
+
+    class Config:
+        orm_mode = True
+
 
 class BookBase(BaseModel):
     title: str
@@ -11,30 +30,28 @@ class BookBase(BaseModel):
 
 
 class BookCreate(BookBase):
-    author_id: int
+    author_ids: List[int]
 
 
-class Book(BookBase):
+class BookUpdate(BaseModel):
+    title: Optional[str] = None
+    publisher_name: Optional[str] = None
+    price: Optional[int] = None
+    author_ids: Optional[List[int]] = None
+
+
+class AuthorOut(BaseModel):
     id: int
+    name: str
+    mobile: str
 
     class Config:
         orm_mode = True
 
 
-# ------------------ AUTHOR SCHEMAS ------------------
-
-class AuthorBase(BaseModel):
-    name: str
-    mobile: Optional[str] = None
-
-
-class AuthorCreate(AuthorBase):
-    pass
-
-
-class Author(AuthorBase):
+class BookOut(BookBase):
     id: int
-    # books: List[Book] = []
+    authors: List[AuthorOut]
 
     class Config:
         orm_mode = True

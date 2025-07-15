@@ -1,0 +1,322 @@
+#Kubernetes_learning
+
+
+____________________________________________________________________________________________________________________________________________
+
+
+# Remove the existing kubernetes setup
+
+# 1. Reset and stop services
+sudo kubeadm reset -f
+sudo systemctl stop kubelet || true
+sudo systemctl disable kubelet || true
+
+sudo rm -f /etc/apt/sources.list.d/kubernetes.list
+
+
+# 2. Purge Kubernetes packages
+sudo apt-get purge -y kubeadm kubectl kubelet kubernetes-cni kube*
+sudo apt-get autoremove -y
+
+# 3. Remove Kubernetes config and data
+sudo rm -rf ~/.kube
+sudo rm -rf /etc/kubernetes
+sudo rm -rf /var/lib/etcd
+sudo rm -rf /var/lib/kubelet
+sudo rm -rf /etc/cni
+sudo rm -rf /opt/cni
+sudo rm -rf /var/lib/cni
+sudo rm -rf /run/flannel
+sudo rm -rf /etc/systemd/system/kubelet.service.d
+
+# 4. Remove Kubernetes apt repo and GPG keys
+sudo rm -f /etc/apt/sources.list.d/kubernetes.list
+sudo rm -f /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+sudo rm -f /etc/apt/trusted.gpg.d/kubernetes.gpg
+
+# 5. (Optional) Remove container runtimes like Docker or containerd
+sudo systemctl stop containerd docker || true
+sudo apt-get purge -y containerd docker.io
+sudo rm -rf /var/lib/containerd /etc/containerd
+sudo rm -rf /var/lib/docker /etc/docker /var/run/docker.sock
+
+# 6. Reload systemd and disable swap
+sudo systemctl daemon-reexec
+sudo systemctl daemon-reload
+sudo swapoff -a
+
+# 7. Final check (should return nothing)
+ps aux | grep -E 'kube|docker|containerd' | grep -v grep
+
+
+
+
+________________________________________________________________________________________________________________________________________
+
+# Perform new setup
+
+########################################################
+# STEP 1: Disable Swap
+########################################################
+# TECHNICAL: Kubernetes expects the node to have swap disabled
+# because its memory scheduler doesn't account for it.
+# LAYMAN: Swap is like slow temporary RAM. Kubernetes wants to manage memory directly,
+# so we turn swap off to avoid confusion.
+
+sudo swapoff -a
+
+
+########################################################
+# STEP 2: Load Required Kernel Modules
+########################################################
+# TECHNICAL: `overlay` is needed for container filesystem support.
+# `br_netfilter` allows Linux to see network traffic between pods.
+# LAYMAN: These are system-level features that containers and Kubernetes networking rely on.
+
+cat <<EOF | sudo tee /etc/modules-load.d/k8s.conf
+overlay
+br_netfilter
+EOF
+
+sudo modprobe overlay
+sudo modprobe br_netfilter
+
+
+########################################################
+# STEP 3: Set sysctl Parameters for Kubernetes Networking
+########################################################
+# TECHNICAL: These settings enable routing and bridge network packet processing,
+# both essential for Kubernetes and container-to-container communication.
+# LAYMAN: These tell Linux to allow internet-style communication between pods and apps.
+
+cat <<EOF | sudo tee /etc/sysctl.d/k8s.conf
+net.bridge.bridge-nf-call-iptables  = 1   # Let iptables see bridged traffic
+net.bridge.bridge-nf-call-ip6tables = 1   # Same as above but for IPv6
+net.ipv4.ip_forward                 = 1   # Allow traffic forwarding between interfaces
+EOF
+
+sudo sysctl --system
+
+
+########################################################
+# STEP 4: Install and Configure containerd (Container Runtime)
+########################################################
+# TECHNICAL: containerd is a high-performance container runtime used by Kubernetes.
+# We also configure it to use systemd for cgroups.
+# LAYMAN: This is the engine that actually runs your apps in containers.
+
+sudo apt-get update
+sudo apt-get install -y ca-certificates curl
+
+# Add Docker’s GPG key
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+
+# Add Docker’s official repo to get containerd
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
+https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo \"$VERSION_CODENAME\") stable" \
+| sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+# Install containerd
+sudo apt-get update
+sudo apt-get install -y containerd.io
+
+# Configure containerd to use systemd for cgroup management (recommended by kubelet)
+containerd config default | sed \
+-e 's/SystemdCgroup = false/SystemdCgroup = true/' \
+-e 's/sandbox_image = "registry.k8s.io\/pause:3.6"/sandbox_image = "registry.k8s.io\/pause:3.9"/' \
+| sudo tee /etc/containerd/config.toml
+
+# Restart containerd to apply changes
+sudo systemctl restart containerd
+sudo systemctl status containerd
+
+
+########################################################
+# STEP 5: Add Kubernetes Package Repository & Install Tools
+########################################################
+# TECHNICAL: Installing kubelet (runs pods), kubeadm (bootstraps cluster), kubectl (manages cluster).
+# LAYMAN: These are the main tools to install, start, and talk to Kubernetes.
+
+sudo apt-get install -y apt-transport-https ca-certificates curl gpg
+
+# Add Kubernetes GPG key
+sudo mkdir -p /etc/apt/keyrings
+curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.33/deb/Release.key \
+| sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+
+# Add Kubernetes apt repo
+echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] \
+https://pkgs.k8s.io/core:/stable:/v1.33/deb/ /' \
+| sudo tee /etc/apt/sources.list.d/kubernetes.list
+
+sudo apt-get update
+
+# Install specific version of Kubernetes tools
+VERSION=1.33.0-1.1
+sudo apt-get install -y kubelet=$VERSION kubeadm=$VERSION kubectl=$VERSION
+
+# Prevent upgrades to avoid compatibility issues
+sudo apt-mark hold kubelet kubeadm kubectl
+
+# Confirm installation
+kubelet --version
+kubeadm version
+kubectl version --client
+
+
+########################################################
+# STEP 6: Initialize the Kubernetes Cluster
+########################################################
+# TECHNICAL: Initializes the control plane on this machine with a specific pod network range.
+# LAYMAN: Starts Kubernetes on this machine and sets it up to control the cluster.
+
+# Calico expects the pod network CIDR to be 192.168.0.0/16
+sudo kubeadm init --pod-network-cidr=192.168.0.0/16
+
+
+########################################################
+# STEP 7: Configure kubectl for Current User
+########################################################
+# TECHNICAL: Copies kubeconfig to let you use kubectl as your regular user.
+# LAYMAN: This sets up the command-line tool (kubectl) to talk to the cluster.
+
+mkdir -p $HOME/.kube
+sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+sudo chown $(id -u):$(id -g) $HOME/.kube/config
+
+
+########################################################
+# STEP 8: Install Calico CNI for Pod Networking
+########################################################
+# TECHNICAL: Calico sets up the network between pods and supports NetworkPolicies.
+# LAYMAN: This allows apps inside Kubernetes to talk to each other and the internet.
+
+kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.27.0/manifests/calico.yaml
+
+
+########################################################
+# STEP 9: Allow Pods to Run on Master Node (Optional for Single Node)
+########################################################
+# TECHNICAL: By default, control-plane nodes are tainted to avoid scheduling pods.
+# LAYMAN: We're allowing the master to also run apps, since we only have one machine.
+
+kubectl taint nodes --all node-role.kubernetes.io/control-plane-
+
+
+########################################################
+# STEP 10: Verify Setup
+########################################################
+# TECHNICAL & LAYMAN: Check if everything is working.
+
+kubectl get nodes            # Should show Ready
+kubectl get pods -A          # All Calico pods should be Running
+
+
+_______________________________________________________________________________________________________________________________
+# Container related commands
+
+
+✅ Step 1: Install containerd
+
+sudo apt-get update
+sudo apt-get install -y containerd
+
+✅ Step 2: Generate and fix config.toml
+
+# Generate default config
+sudo mkdir -p /etc/containerd
+containerd config default | sudo tee /etc/containerd/config.toml > /dev/null
+
+Now edit the config to set SystemdCgroup = true:
+
+sudo sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
+
+✅ Step 3: Restart services
+
+sudo systemctl restart containerd
+sudo systemctl enable containerd
+sudo systemctl restart kubelet
+
+✅ Step 4: Check that pods start running
+
+kubectl get pods -A
+
+
+
+
+
+__________________________________________________________________________________________________________________________________
+
+curl http://localhost:30500/v2/_catalog
+
+
+# Download buildah (We are not installing Docker since under the hood it uses containerd , and containerd is in use Kubernetes)
+
+. /etc/os-release
+echo "deb https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable/xUbuntu_${VERSION_ID}/ /" | \
+  sudo tee /etc/apt/sources.list.d/devel:kubic:libcontainers:stable.list
+
+
+
+curl -L https://download.opensuse.org/repositories/devel:kubic:libcontainers:stable/xUbuntu_${VERSION_ID}/Release.key | \
+  sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/libcontainers.gpg
+
+
+sudo apt-get update
+
+sudo apt-get install -y buildah
+
+buildah --version
+
+
+buildah bud -t localhost:30500/book_author_app:latest .
+
+buildah push --tls-verify=false localhost:30500/book_author_app:latest
+
+
+kubectl rollout restart deployment book-author-app-deployment -n book-author
+
+buildah tag localhost:30500/book_author_app:latest 192.168.1.103:30500/book_author_app:latest
+
+buildah push --tls-verify=false 192.168.1.103:30500/book_author_app:latest
+
+
+_________________________________________________________________________________________________________________________________
+
+# Create kubernetes secret manager
+
+kubectl create secret generic book-author-secret \
+  --from-env-file=.env \
+  --namespace=book-author
+
+kubectl describe secret book-author-secret  --namespace=book-author
+
+kubectl get secret book-author-secret -n book-author -o jsonpath="{.data}" | tr -d '{}" ' | tr ',' '\n' | while IFS=: read k v; do echo "$k=$(echo $v | base64 --decode)"; done
+
+
+kubectl delete secret book-author-secret
+
+
+
+
+____________________________________________________________________________________________________________________________________
+
+# How to run kubernetes on restart the laptop
+
+sudo swapoff -a
+sudo systemctl daemon-reexec
+sudo systemctl restart kubelet
+sudo systemctl status kubelet
+
+
+
+____________________________________________________________________________________________________________________________________
+nohup python bucket_url_script.py > stu_assess_records_url_update_logs.txt 2>&1 &
+
+ps aux | grep bucket_url_script.py
+
+tail -f stu_assess_records_url_update_logs.txt
+___________________________________________________________________________________________________________________________________
+

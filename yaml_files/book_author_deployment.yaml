@@ -16,7 +16,7 @@ spec:
       restartPolicy: Always
       containers:
       - name: book-author-app
-        image: localhost:5000/book_author_app:latest
+        image: 192.168.1.103:30500/book_author_app:latest
         imagePullPolicy: IfNotPresent
         ports:
           - containerPort: 8000

@@ -4,10 +4,11 @@ metadata:
   name: book-author-app-service
   namespace: book-author
 spec:
-  type: ClusterIP
+  type: NodePort
   selector:
     app: book-author-app
   ports:
     - protocol: TCP
       port: 8080          # The port on the service (what users call from outside — like 8080).
       targetPort: 8000   # The port on the container (pod). In your FastAPI app, it’s 8000.
+      nodePort: 30080   # Host machine (LAN) port
